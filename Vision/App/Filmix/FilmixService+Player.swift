@@ -1,14 +1,15 @@
 import Foundation
 import Alamofire
 
-
-
 extension FilmixService {
-    private static let playerHeaders: HTTPHeaders = [
-        "x-requested-with": "XMLHttpRequest",
-        "Cookie": "x-a-key=sinatra; minotaurs=BwKTqYFEI7IajQ1K2DgBpfd6Jj068gqXgjCpjnvSvyo=; FILMIXNET=n6ikd2devj8nsp4h0js1uiajbp; ishimura=5bde72cd5cfdf26fe5bfb00504602fd178ebb3f4; alora=BwKTqYFEI7IajQ1K2DgBpfd6Jj068gqXgjCpjnvSvyo=",
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-    ]
+    func getCookiesString(for urlString: String) -> String {
+        guard let url = URL(string: urlString),
+              let cookies = HTTPCookieStorage.shared.cookies(for: url) else {
+            return ""
+        }
+        
+        return HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] ?? ""
+    }
 
     func fetchPlayerData(postId: Int,
                          isSeries: Bool,
@@ -16,8 +17,16 @@ extension FilmixService {
         let ts  = Int(Date().timeIntervalSince1970)
         let url = "\(baseURL)/api/movies/player-data?t=\(ts)"
         let params: Parameters = ["post_id": "\(postId)", "showfull": "true"]
-
-        session.request(url, method: .post, parameters: params, headers: Self.playerHeaders)
+        let cookieHeader = getCookiesString(for: baseURL)
+        print(cookieHeader)
+        
+        let headers:HTTPHeaders = [
+            "x-requested-with": "XMLHttpRequest",
+            "Cookie": cookieHeader,
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+        ]
+        
+        session.request(url, method: .post, parameters: params, headers: headers)
             .responseDecodable(of: _FilmixPlayerResponse.self) { response in
                 switch response.result {
                 case .failure(let error):

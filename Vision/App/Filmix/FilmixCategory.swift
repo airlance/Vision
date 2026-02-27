@@ -6,6 +6,7 @@ struct FilmixCategory {
     let icon: String
     var isFavorites: Bool = false
     var isWatchHistory: Bool = false
+    var isSearch: Bool = false
     var genres: [FilmixGenre] = []
 
     static let all: [FilmixCategory] = [

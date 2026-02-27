@@ -10,6 +10,9 @@ final class FilmixService {
     let baseURL = "https://filmix.my"
     let session: Session = {
         let config = URLSessionConfiguration.default
+        config.httpAdditionalHeaders = [
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+        ]
         config.httpCookieStorage = HTTPCookieStorage.shared
         config.httpShouldSetCookies = true
         config.httpCookieAcceptPolicy = .always

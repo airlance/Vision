@@ -42,10 +42,6 @@ private struct _SuggestionPost: Decodable {
 }
 
 extension FilmixService {
-    func fetchSuggestions(query: String,
-                          completion: @escaping (Result<[FilmixSuggestion], Error>) -> Void) {
-        completion(.success([]))
-    }
 
     private static let searchHeaders: HTTPHeaders = [
         "x-requested-with": "XMLHttpRequest",

@@ -8,7 +8,16 @@ extension FilmixService {
             return ""
         }
         
-        return HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] ?? ""
+        var cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] ?? ""
+        if !cookieHeader.contains("alora="),
+           let url = URL(string: baseURL),
+           let cookies = HTTPCookieStorage.shared.cookies(for: url),
+           let minotaurs = cookies.first(where: { $0.name == "minotaurs" }) {
+            let separator = cookieHeader.isEmpty ? "" : "; "
+            cookieHeader += "\(separator)alora=\(minotaurs.value)"
+        }
+        
+        return cookieHeader
     }
 
     func fetchPlayerData(postId: Int,
@@ -17,12 +26,9 @@ extension FilmixService {
         let ts  = Int(Date().timeIntervalSince1970)
         let url = "\(baseURL)/api/movies/player-data?t=\(ts)"
         let params: Parameters = ["post_id": "\(postId)", "showfull": "true"]
-        let cookieHeader = getCookiesString(for: baseURL)
-        print(cookieHeader)
-        
         let headers:HTTPHeaders = [
             "x-requested-with": "XMLHttpRequest",
-            "Cookie": cookieHeader,
+            "Cookie": getCookiesString(for: baseURL),
             "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
         ]
         

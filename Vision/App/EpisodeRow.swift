@@ -69,7 +69,6 @@ final class EpisodeRow: UIView {
         watched = w
         mainControl.setWatched(w)
         watchedControl.setWatched(w)
-        // Если стало просмотренным — скрываем progress bar
         if w { progressBar.setFraction(nil) }
     }
 

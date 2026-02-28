@@ -3,7 +3,7 @@ import UIKit
 protocol CategoryTabBarDelegate: AnyObject {
     func categoryTabBar(_ bar: CategoryTabBar, didSelect category: FilmixCategory)
     func categoryTabBar(_ bar: CategoryTabBar, didSelectGenre genre: FilmixGenre, in category: FilmixCategory)
-    func categoryTabBarDidSelectSearch(_ bar: CategoryTabBar)
+    func categoryTabBar(_ bar: CategoryTabBar, didSubmitSearch query: String)
     func categoryTabBarDidSelectSettings(_ bar: CategoryTabBar)
 }
 
@@ -16,8 +16,10 @@ final class CategoryTabBar: UIView {
     // MARK: - Heights
     static let mainRowHeight:  CGFloat = 76
     static let genreRowHeight: CGFloat = 58
+    static let searchRowHeight: CGFloat = 64
     static var collapsedHeight: CGFloat { mainRowHeight }
     static var expandedHeight:  CGFloat { mainRowHeight + genreRowHeight }
+    static var searchExpandedHeight: CGFloat { mainRowHeight + searchRowHeight }
 
     private let categories = FilmixCategory.all
     private var selectedIndex = 0
@@ -27,6 +29,9 @@ final class CategoryTabBar: UIView {
     private var genreButtons: [GenreTabButton] = []
     private var selectedGenreIndex: Int? = nil
     private var currentGenres: [FilmixGenre] = []
+
+    // Search row state
+    private var isSearchActive = false
 
     // MARK: - Main row
 
@@ -45,14 +50,14 @@ final class CategoryTabBar: UIView {
         return sv
     }()
 
-    private let searchButton: CategorySearchButton = {
-        let b = CategorySearchButton()
+    private let settingsButton: CategorySettingsButton = {
+        let b = CategorySettingsButton()
         b.translatesAutoresizingMaskIntoConstraints = false
         return b
     }()
 
-    private let settingsButton: CategorySettingsButton = {
-        let b = CategorySettingsButton()
+    private let searchShortcutButton: CategorySearchButton = {
+        let b = CategorySearchButton()
         b.translatesAutoresizingMaskIntoConstraints = false
         return b
     }()
@@ -99,6 +104,70 @@ final class CategoryTabBar: UIView {
 
     private var genreRowHeightConstraint: NSLayoutConstraint!
 
+    // MARK: - Search row
+
+    private let searchRow: UIView = {
+        let v = UIView()
+        v.clipsToBounds = true
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
+    private let searchContainer: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor(white: 1, alpha: 0.08)
+        v.layer.cornerRadius = 12
+        v.layer.cornerCurve = .continuous
+        v.layer.borderWidth = 1
+        v.layer.borderColor = UIColor(white: 1, alpha: 0.12).cgColor
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
+    private let searchIcon: UIImageView = {
+        let iv = UIImageView(image: UIImage(systemName: "magnifyingglass"))
+        iv.tintColor = UIColor(white: 0.45, alpha: 1)
+        iv.contentMode = .scaleAspectFit
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        return iv
+    }()
+
+    lazy var searchTextField: UITextField = {
+        let tf = UITextField()
+        tf.font = UIFont.systemFont(ofSize: 26, weight: .regular)
+        tf.textColor = .white
+        tf.tintColor = .white
+        tf.attributedPlaceholder = NSAttributedString(
+            string: "Поиск фильмов и сериалов...",
+            attributes: [.foregroundColor: UIColor(white: 0.30, alpha: 1)]
+        )
+        tf.returnKeyType = .search
+        tf.autocorrectionType = .no
+        tf.autocapitalizationType = .none
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        return tf
+    }()
+
+    private lazy var searchClearButton: UIButton = {
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: "xmark.circle.fill")
+        config.baseForegroundColor = UIColor(white: 0.40, alpha: 1)
+        let b = UIButton(configuration: config)
+        b.isHidden = true
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.addTarget(self, action: #selector(clearSearchTapped), for: .touchUpInside)
+        return b
+    }()
+
+    private let searchSeparator: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor(white: 1, alpha: 0.07)
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
+    private var searchRowHeightConstraint: NSLayoutConstraint!
+
     // MARK: - Init
 
     override init(frame: CGRect) {
@@ -114,15 +183,22 @@ final class CategoryTabBar: UIView {
     private func build() {
         addSubview(mainRow)
         addSubview(genreRow)
+        addSubview(searchRow)
         addSubview(separatorBottom)
 
         mainRow.addSubview(stackView)
-        mainRow.addSubview(searchButton)
         mainRow.addSubview(settingsButton)
+        mainRow.addSubview(searchShortcutButton)
 
         genreRow.addSubview(genreScrollView)
         genreScrollView.addSubview(genreStack)
         genreRow.addSubview(genreSeparator)
+
+        searchRow.addSubview(searchContainer)
+        searchContainer.addSubview(searchIcon)
+        searchContainer.addSubview(searchTextField)
+        searchContainer.addSubview(searchClearButton)
+        searchRow.addSubview(searchSeparator)
 
         // Category tab buttons
         for (i, cat) in categories.enumerated() {
@@ -131,8 +207,13 @@ final class CategoryTabBar: UIView {
             btn.isActiveTab = (i == 0)
             let index = i
             btn.onSelect = { [weak self] in
-                guard let self, index != self.selectedIndex else {
-                    if let self, index == self.selectedIndex {
+                guard let self else { return }
+                if index == self.selectedIndex {
+                    // Tapped active tab — deselect genre / reset search
+                    if self.categories[index].isSearch {
+                        self.searchTextField.text = ""
+                        self.searchClearButton.isHidden = true
+                    } else {
                         self.deselectGenre()
                         self.delegate?.categoryTabBar(self, didSelect: self.categories[index])
                     }
@@ -141,16 +222,18 @@ final class CategoryTabBar: UIView {
                 self.tabButtons[self.selectedIndex].isActiveTab = false
                 self.selectedIndex = index
                 self.tabButtons[index].isActiveTab = true
-                self.showGenres(for: self.categories[index])
-                self.delegate?.categoryTabBar(self, didSelect: self.categories[index])
+
+                let category = self.categories[index]
+                if category.isSearch {
+                    self.showSearchRow(animated: true)
+                } else {
+                    self.hideSearchRow(animated: true)
+                    self.showGenres(for: category)
+                    self.delegate?.categoryTabBar(self, didSelect: category)
+                }
             }
             stackView.addArrangedSubview(btn)
             tabButtons.append(btn)
-        }
-
-        searchButton.onSelect = { [weak self] in
-            guard let self else { return }
-            self.delegate?.categoryTabBarDidSelectSearch(self)
         }
 
         settingsButton.onSelect = { [weak self] in
@@ -158,7 +241,16 @@ final class CategoryTabBar: UIView {
             self.delegate?.categoryTabBarDidSelectSettings(self)
         }
 
+        searchShortcutButton.onSelect = { [weak self] in
+            guard let self else { return }
+            self.activateSearch()
+        }
+
+        searchTextField.delegate = self
+        searchTextField.addTarget(self, action: #selector(searchTextChanged), for: .editingChanged)
+
         genreRowHeightConstraint = genreRow.heightAnchor.constraint(equalToConstant: 0)
+        searchRowHeightConstraint = searchRow.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
             // Main row
@@ -171,13 +263,13 @@ final class CategoryTabBar: UIView {
             settingsButton.leadingAnchor.constraint(equalTo: mainRow.leadingAnchor, constant: 24),
             settingsButton.centerYAnchor.constraint(equalTo: mainRow.centerYAnchor),
 
-            // Category tabs — centered between settings and search
+            // Category tabs
             stackView.leadingAnchor.constraint(equalTo: settingsButton.trailingAnchor, constant: 20),
             stackView.centerYAnchor.constraint(equalTo: mainRow.centerYAnchor),
 
-            // Search button — far right
-            searchButton.trailingAnchor.constraint(equalTo: mainRow.trailingAnchor, constant: -24),
-            searchButton.centerYAnchor.constraint(equalTo: mainRow.centerYAnchor),
+            // Search shortcut button — far right
+            searchShortcutButton.trailingAnchor.constraint(equalTo: mainRow.trailingAnchor, constant: -24),
+            searchShortcutButton.centerYAnchor.constraint(equalTo: mainRow.centerYAnchor),
 
             // Genre row
             genreRow.topAnchor.constraint(equalTo: mainRow.bottomAnchor),
@@ -201,7 +293,37 @@ final class CategoryTabBar: UIView {
             genreSeparator.bottomAnchor.constraint(equalTo: genreRow.bottomAnchor),
             genreSeparator.heightAnchor.constraint(equalToConstant: 1),
 
-            // Bottom separator (of entire bar)
+            // Search row
+            searchRow.topAnchor.constraint(equalTo: mainRow.bottomAnchor),
+            searchRow.leadingAnchor.constraint(equalTo: leadingAnchor),
+            searchRow.trailingAnchor.constraint(equalTo: trailingAnchor),
+            searchRowHeightConstraint,
+
+            searchContainer.leadingAnchor.constraint(equalTo: searchRow.leadingAnchor, constant: 80),
+            searchContainer.trailingAnchor.constraint(equalTo: searchRow.trailingAnchor, constant: -80),
+            searchContainer.centerYAnchor.constraint(equalTo: searchRow.centerYAnchor, constant: -2),
+            searchContainer.heightAnchor.constraint(equalToConstant: 48),
+
+            searchIcon.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: 16),
+            searchIcon.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
+            searchIcon.widthAnchor.constraint(equalToConstant: 20),
+            searchIcon.heightAnchor.constraint(equalToConstant: 20),
+
+            searchTextField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 12),
+            searchTextField.trailingAnchor.constraint(equalTo: searchClearButton.leadingAnchor, constant: -8),
+            searchTextField.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
+
+            searchClearButton.trailingAnchor.constraint(equalTo: searchContainer.trailingAnchor, constant: -12),
+            searchClearButton.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
+            searchClearButton.widthAnchor.constraint(equalToConstant: 30),
+            searchClearButton.heightAnchor.constraint(equalToConstant: 30),
+
+            searchSeparator.leadingAnchor.constraint(equalTo: searchRow.leadingAnchor),
+            searchSeparator.trailingAnchor.constraint(equalTo: searchRow.trailingAnchor),
+            searchSeparator.bottomAnchor.constraint(equalTo: searchRow.bottomAnchor),
+            searchSeparator.heightAnchor.constraint(equalToConstant: 1),
+
+            // Bottom separator
             separatorBottom.leadingAnchor.constraint(equalTo: leadingAnchor),
             separatorBottom.trailingAnchor.constraint(equalTo: trailingAnchor),
             separatorBottom.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -266,6 +388,60 @@ final class CategoryTabBar: UIView {
         }
     }
 
+    // MARK: - Search Row Management
+
+    private func showSearchRow(animated: Bool) {
+        isSearchActive = true
+        // Hide genre row first
+        genreRowHeightConstraint.constant = 0
+        searchRowHeightConstraint.constant = Self.searchRowHeight
+
+        if animated {
+            UIView.animate(withDuration: 0.28, delay: 0,
+                           usingSpringWithDamping: 0.85, initialSpringVelocity: 0) {
+                self.superview?.layoutIfNeeded()
+            } completion: { _ in
+                self.searchTextField.becomeFirstResponder()
+            }
+        } else {
+            superview?.layoutIfNeeded()
+            searchTextField.becomeFirstResponder()
+        }
+    }
+
+    private func hideSearchRow(animated: Bool) {
+        guard isSearchActive else { return }
+        isSearchActive = false
+        searchTextField.resignFirstResponder()
+        searchTextField.text = ""
+        searchClearButton.isHidden = true
+        searchRowHeightConstraint.constant = 0
+        tabButtons[safe: selectedIndex]?.isActiveTab = true
+
+        if animated {
+            UIView.animate(withDuration: 0.28, delay: 0,
+                           usingSpringWithDamping: 0.85, initialSpringVelocity: 0) {
+                self.superview?.layoutIfNeeded()
+            }
+        } else {
+            superview?.layoutIfNeeded()
+        }
+    }
+
+    // MARK: - Search actions
+
+    @objc private func searchTextChanged() {
+        let text = searchTextField.text ?? ""
+        searchClearButton.isHidden = text.isEmpty
+    }
+
+    @objc private func clearSearchTapped() {
+        searchTextField.text = ""
+        searchClearButton.isHidden = true
+        // Notify with empty to clear results
+        delegate?.categoryTabBar(self, didSubmitSearch: "")
+    }
+
     // MARK: - Programmatic selection
 
     func select(index: Int) {
@@ -273,8 +449,53 @@ final class CategoryTabBar: UIView {
         tabButtons[selectedIndex].isActiveTab = false
         selectedIndex = index
         tabButtons[selectedIndex].isActiveTab = true
-        showGenres(for: categories[index])
+        let category = categories[index]
+        if category.isSearch {
+            showSearchRow(animated: false)
+        } else {
+            hideSearchRow(animated: false)
+            showGenres(for: category)
+        }
+    }
+
+    /// Called when search shortcut button (magnifying glass) is tapped
+    func activateSearch() {
+        // If already in search mode — just focus the text field
+        if isSearchActive {
+            searchTextField.becomeFirstResponder()
+            return
+        }
+        isSearchActive = true
+        tabButtons[safe: selectedIndex]?.isActiveTab = false
+        genreRowHeightConstraint.constant = 0
+        searchRowHeightConstraint.constant = Self.searchRowHeight
+
+        UIView.animate(withDuration: 0.28, delay: 0,
+                       usingSpringWithDamping: 0.85, initialSpringVelocity: 0) {
+            self.superview?.layoutIfNeeded()
+        } completion: { _ in
+            self.searchTextField.becomeFirstResponder()
+        }
+
+        // Notify delegate so RootController switches to search mode
+        delegate?.categoryTabBar(self, didSelect: FilmixCategory(
+            title: "Поиск", url: "", icon: "magnifyingglass", isSearch: true
+        ))
     }
 
     var hasGenres: Bool { !currentGenres.isEmpty }
+    var currentIsSearch: Bool { isSearchActive }
+}
+
+// MARK: - UITextFieldDelegate
+
+extension CategoryTabBar: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        let query = textField.text?.trimmingCharacters(in: .whitespaces) ?? ""
+        textField.resignFirstResponder()
+        if !query.isEmpty {
+            delegate?.categoryTabBar(self, didSubmitSearch: query)
+        }
+        return true
+    }
 }

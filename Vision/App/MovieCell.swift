@@ -1,6 +1,6 @@
 import UIKit
 
-final class MovieCell: UICollectionViewCell {
+final class MovieCells: UICollectionViewCell {
     static let reuseID = "MovieCell"
 
     private let posterImageView: UIImageView = {

@@ -43,9 +43,15 @@ final class VideoPreviewPresenter {
         overlayNode.view.isHidden = true
     }
 
+    /// Вызывать из viewDidLayoutSubviews — пересчитывает frame если панель видима
+    func updateFrameIfNeeded() {
+        guard !(overlayNode.view.isHidden) else { return }
+        updateFrame()
+    }
+
     // MARK: - Private
 
-    private func updateFrame() {
+    func updateFrame() {
         guard let superview = overlayNode.view.superview else { return }
         let bounds = superview.bounds
         overlayNode.view.frame = CGRect(
